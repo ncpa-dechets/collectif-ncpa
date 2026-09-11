@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Situation de livraison — Logements collectifs | NCPA</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+:root{
+  --rouge:#B91E27;
+  --vert:#B1B993;
+  --livre:#3F9142;
+  --nonlivre:#D6453E;
+  --avis:#E8A33D;
+  --autre:#8C949E;
+  --bloque:#6C5CE7;
+
+  --bg:#11151b;
+  --bg2:#181d25;
+  --card:#1d232c;
+  --bord:#2a323d;
+  --txt:#e9ecf1;
+  --mut:#98a2b0;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font-family:Calibri,"Segoe UI",system-ui,sans-serif;
+  background:var(--bg);color:var(--txt);
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:14px;
+}
+
+/* ========== BARRE SUPÉRIEURE ========== */
+.topbar{
+  flex:0 0 auto;background:var(--bg);border-bottom:3px solid var(--rouge);
+  display:flex;align-items:center;gap:14px;padding:8px 16px;
+}
+.badge{
+  background:var(--rouge);color:#fff;font-weight:700;font-size:12px;letter-spacing:.08em;
+  padding:4px 8px;border-radius:3px;
+}
+.topbar h1{font-size:17px;margin:0;font-weight:700}
+.sep{width:1px;height:20px;background:var(--bord)}
+.meta{font-size:12px;color:var(--mut)}
+.actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+
+button{
+  font-family:inherit;font-size:13px;padding:6px 11px;border-radius:4px;cursor:pointer;
+  background:var(--card);border:1px solid var(--bord);color:var(--txt);
+  display:inline-flex;align-items:center;gap:6px;
+}
+button:hover{border-color:var(--mut)}
+button.red{border-color:var(--rouge);color:#ff8e8e}
+button.red:hover{background:var(--rouge);color:#fff}
+button.on{border-color:var(--avis);color:var(--avis)}
+button:disabled{opacity:.4;cursor:not-allowed}
+
+/* ========== BANDEAU KPI ========== */
+.kpis{
+  flex:0 0 auto;background:var(--bg);display:flex;gap:36px;
+  padding:12px 20px;border-bottom:1px solid var(--bord);align-items:flex-start;
+}
+.kpi .v{font-size:26px;font-weight:700;line-height:1.05}
+.kpi .l{font-size:13px;font-weight:700;margin-top:2px}
+.kpi .s{font-size:11.5px;color:var(--mut)}
+.kpi.g .v{color:var(--livre)}
+.kpi.r .v{color:var(--nonlivre)}
+.kpi.b .v{color:var(--avis)}
+.ctx{margin-left:auto;text-align:right}
+.ctx b{font-size:14px}
+
+/* ========== CORPS ========== */
+#body{flex:1 1 auto;height:0;display:flex;min-height:0}
+#panel{
+  width:300px;flex:0 0 300px;background:var(--bg);border-right:1px solid var(--bord);
+  display:flex;flex-direction:column;min-height:0;
+}
+.tabs{display:flex;flex:0 0 auto;border-bottom:1px solid var(--bord)}
+.tabs button{
+  flex:1;border:0;background:transparent;border-radius:0;border-bottom:2px solid transparent;
+  color:var(--mut);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
+  padding:10px 4px;justify-content:center;font-weight:700;
+}
+.tabs button.sel{color:var(--txt);border-bottom-color:var(--rouge)}
+.tabpane{display:none;overflow-y:auto;padding:14px;flex:1 1 auto}
+.tabpane.sel{display:block}
+
+.h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:0 0 8px;font-weight:700}
+.h2.mt{margin-top:18px}
+
+select,input[type=text]{
+  width:100%;font-family:inherit;font-size:13px;padding:7px 8px;border-radius:4px;
+  background:var(--card);border:1px solid var(--bord);color:var(--txt);
+}
+input[type=range]{width:100%;accent-color:var(--rouge)}
+
+/* cartes de couches */
+.lyr{
+  display:flex;gap:9px;align-items:flex-start;background:var(--card);border:1px solid var(--bord);
+  border-radius:5px;padding:9px 10px;margin-bottom:7px;cursor:pointer;user-select:none;
+}
+.lyr.off{opacity:.4}
+.lyr .dot{width:11px;height:11px;border-radius:50%;margin-top:3px;flex:0 0 11px}
+.lyr .t{font-size:13px;font-weight:700}
+.lyr .d{font-size:11px;color:var(--mut);line-height:1.3}
+.lyr .n{margin-left:auto;background:var(--bg2);border:1px solid var(--bord);border-radius:10px;
+  padding:1px 8px;font-size:12px;font-variant-numeric:tabular-nums}
+
+label.chk{display:flex;align-items:center;gap:8px;font-size:13px;margin:7px 0;cursor:pointer}
+.rangerow{display:flex;justify-content:space-between;font-size:13px;margin-top:10px}
+
+/* barre d'avancement */
+.pbar{height:9px;background:var(--card);border-radius:5px;overflow:hidden;margin:8px 0 4px;border:1px solid var(--bord)}
+.pbar>i{display:block;height:100%;background:var(--livre)}
+.plab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mut)}
+.plab b{background:var(--card);border:1px solid var(--bord);border-radius:3px;padding:0 6px;color:var(--txt)}
+
+/* mini-graphes */
+.row{margin-bottom:9px}
+.row .l{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+.row .l span:last-child{color:var(--mut);font-variant-numeric:tabular-nums}
+.row .b{height:7px;background:var(--card);border-radius:4px;overflow:hidden}
+.row .b>i{display:block;height:100%}
+
+.warn{font-size:11.5px;background:#2a2314;border-left:3px solid var(--avis);color:#e6cfa0;
+  padding:8px 9px;border-radius:0 4px 4px 0;margin-top:14px;line-height:1.4}
+
+/* ========== CARTE / TABLEAU ========== */
+#right{flex:1 1 auto;display:flex;flex-direction:column;min-width:0}
+#map{flex:1 1 auto;height:0;position:relative;background:#e8e8e6}
+#tableWrap{flex:0 0 auto;height:0;overflow:auto;border-top:1px solid var(--bord);display:none;background:var(--bg)}
+#tableWrap.on{display:block;height:260px}
+
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:5px 8px;border-bottom:1px solid var(--bord);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--bg2);cursor:pointer;font-weight:700;z-index:2}
+th:hover{color:var(--avis)}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--bg2)}
+tbody tr.sel{background:#3a1c1e}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff}
+
+/* tableau communes dans le panneau */
+#comTable td,#comTable th{padding:4px 5px;font-size:12px;border-bottom:1px solid var(--bord)}
+#comTable th{background:transparent;position:static;color:var(--mut);font-size:10.5px;text-transform:uppercase}
+#comTable tr.act td{color:var(--avis)}
+
+/* ========== POPUP (thème clair sur la carte) ========== */
+.leaflet-popup-content-wrapper{border-radius:5px}
+.leaflet-popup-content{margin:11px 13px;font-family:Calibri,"Segoe UI",system-ui,sans-serif;
+  font-size:13px;color:#242424;max-height:330px;overflow:auto}
+.leaflet-popup-content h3{margin:0 0 2px;font-size:14.5px}
+.pop-adr{color:#6b6b6b;font-size:12px;margin-bottom:7px}
+.pop-t{width:100%;border-collapse:collapse;font-size:12px}
+.pop-t td{border:0;padding:2px 0;white-space:normal;color:#242424}
+.pop-t td:first-child{color:#6b6b6b;width:48%}
+.pop-sec{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--rouge);
+  margin:9px 0 2px;font-weight:700;border-top:1px solid #eee;padding-top:6px}
+.pop-note{background:#fff6e5;color:#6b4b10;padding:5px 7px;border-radius:3px;font-size:11.5px;margin-top:7px}
+
+/* ========== MODALES ========== */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999}
+.modal.hide{display:none}
+.modal .box{background:var(--bg2);border-top:4px solid var(--rouge);border-radius:6px;
+  max-width:560px;width:92%;padding:22px;max-height:86vh;overflow:auto}
+.modal h2{margin:6px 0 8px;font-size:19px}
+.modal p,.modal li{font-size:13px;color:var(--mut);line-height:1.5}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--rouge);font-weight:700}
+#msg{font-size:13px;margin-top:10px;min-height:18px}
+.err{color:#ff8e8e}
+.legrow{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px;color:var(--txt)}
+.legrow .dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px}
+
+@media(max-width:900px){
+  #body{flex-direction:column}
+  #panel{width:auto;flex:0 0 auto;max-height:45vh;border-right:0;border-bottom:1px solid var(--bord)}
+  .kpis{gap:18px;overflow-x:auto}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="badge">NCPA</span>
+  <h1>Situation Collectif</h1>
+  <span class="sep"></span>
+  <span class="meta" id="dataDate">Aucune donnée chargée</span>
+  <div class="actions">
+    <button id="btnHelp">Comprendre la carte</button>
+    <button id="btnTable" disabled>Tableau</button>
+    <button id="btnCsv" disabled>Exporter CSV</button>
+    <button id="btnGeo" disabled>Exporter GeoJSON</button>
+    <button id="btnLoad" class="red">Actualiser les données</button>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi g"><div class="v" id="k1">—</div><div class="l">Adresses livrées</div><div class="s" id="k1s">—</div></div>
+  <div class="kpi g"><div class="v" id="k2">—</div><div class="l">Avancement de la livraison</div><div class="s">hors situations bloquées</div></div>
+  <div class="kpi r"><div class="v" id="k3">—</div><div class="l">Adresses à traiter</div><div class="s" id="k3s">—</div></div>
+  <div class="kpi b"><div class="v" id="k4">—</div><div class="l">Appartements livrés</div><div class="s" id="k4s">—</div></div>
+  <div class="ctx"><b id="ctxTitle">Tout le territoire</b><div class="s meta" id="ctxSub">—</div></div>
+</div>
+
+<div id="body">
+  <aside id="panel">
+    <div class="tabs">
+      <button data-t="leg" class="sel">Légende</button>
+      <button data-t="sta">Statistiques</button>
+      <button data-t="com">Communes</button>
+    </div>
+
+    <!-- LÉGENDE -->
+    <div class="tabpane sel" id="p-leg">
+      <div class="h2">Filtrer par commune</div>
+      <select id="fCommune"><option value="">— Toutes les communes —</option></select>
+
+      <div class="h2 mt">Couches cartographiques</div>
+      <div id="legend"></div>
+
+      <div class="h2 mt">Affichage</div>
+      <label class="chk"><input type="checkbox" id="optSize" checked> Taille selon le nb d'appartements</label>
+      <label class="chk"><input type="checkbox" id="optSpread" checked> Écarter les points superposés</label>
+      <div class="rangerow"><span>Nb d'appartements minimum</span><b id="minLab">0</b></div>
+      <input type="range" id="fMin" min="0" max="100" step="1" value="0">
+      <input type="text" id="fSearch" placeholder="Rechercher (nom, voie, référence)" style="margin-top:10px">
+
+      <div class="h2 mt">Avancement livraisons</div>
+      <div class="pbar"><i id="pbar" style="width:0"></i></div>
+      <div class="plab"><span id="plabTxt">—</span><b id="plabPc">—</b></div>
+
+      <div id="warn"></div>
+    </div>
+
+    <!-- STATISTIQUES -->
+    <div class="tabpane" id="p-sta"></div>
+
+    <!-- COMMUNES -->
+    <div class="tabpane" id="p-com"></div>
+  </aside>
+
+  <div id="right">
+    <div id="map"></div>
+    <div id="tableWrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<!-- modale mot de passe -->
+<div class="modal" id="modal">
+  <div class="box" style="max-width:460px">
+    <div class="eyebrow">NCPA — Logements collectifs</div>
+    <h2>Accès aux données</h2>
+    <p>Cet outil charge les données de suivi depuis le dépôt. Saisissez le mot de passe d'accès
+       pour afficher la carte.</p>
+    <input type="password" id="pwd" placeholder="Mot de passe" autocomplete="current-password"
+           style="margin-top:14px;width:100%;font-family:inherit;font-size:14px;padding:9px 10px;
+                  border-radius:4px;background:var(--card);border:1px solid var(--bord);color:var(--txt)">
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button id="btnOk" class="red" style="flex:1;justify-content:center">Accéder aux données</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+</div>
+
+<!-- modale aide -->
+<div class="modal hide" id="help">
+  <div class="box">
+    <div class="eyebrow">Mode d'emploi</div>
+    <h2>Comprendre la carte</h2>
+    <p><b>Un point = une adresse de logement collectif</b> recensée sur le territoire.</p>
+    <div class="h2 mt">Couleur : statut de livraison</div>
+    <div id="helpLeg"></div>
+    <div class="h2 mt">Taille du point</div>
+    <p>Proportionnelle au nombre d'appartements (échelle en racine carrée, pour que les grandes
+       résidences n'écrasent pas les petits immeubles). Un point semi-transparent signale un
+       nombre d'appartements non renseigné.</p>
+    <div class="h2 mt">Points à liseré pointillé</div>
+    <p>Adresses partageant des coordonnées strictement identiques avec d'autres : elles sont
+       légèrement écartées en cercle pour rester cliquables. Position réelle conservée dans les exports.</p>
+    <div class="h2 mt">Situations bloquées</div>
+    <p>Adresses non livrées dont le champ ÉTAT indique « PAS DE PLACE », « REFUS » ou « PRIVE ».
+       Elles sont exclues du calcul d'avancement, comme les non livrables de l'outil Conteneurisation.</p>
+    <div style="margin-top:16px;text-align:right"><button id="btnHelpClose" class="red">Fermer</button></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================
+   1. CONSTANTES
+   ========================================================= */
+const DATA_URL = "situation_collectif.xlsx";
+const SHEET    = "collectif";
+
+const STATUTS = {
+  livre:    {lab:"Livrées",          desc:"Bacs livrés (OM et/ou tri)",            color:"#3F9142"},
+  nonlivre: {lab:"Non livrées",      desc:"Statut de livraison vide",              color:"#D6453E"},
+  avis:     {lab:"Avis de passage",  desc:"Passage effectué, livraison en attente",color:"#E8A33D"},
+  autre:    {lab:"Autre statut",     desc:"Valeur inattendue dans la colonne",     color:"#8C949E"}
+};
+const BLOQUANTS = ["PASDEPLACE","REFUS","PRIVE"];
+
+// en-têtes Excel -> clés internes (insensible casse/accents/ponctuation)
+// NB : la colonne Commentaires n'est volontairement PAS lue (données personnelles).
+const MAP = {
+  "REFERENCE":"ref","NOM":"nom","COMMUNE":"commune","N":"num","VOIE":"voie",
+  "LATITUDE":"lat","LONGITUDE":"lon","NBAPPART":"appart",
+  "STATUTLIVRAISON":"statut","ETAT":"etat",
+  "VOLENPLACEOM":"volOM","VOLTHEOOM":"theoOM","ECARTOM":"ecartOM",
+  "NBBACS660OM":"bacsOM","FREQOM":"freqOM",
+  "VOLENPLACETRI":"volTRI","VOLTHEOTRI":"theoTRI","ECARTTRI":"ecartTRI",
+  "NBBACS660TRI":"bacsTRI","FREQTRI":"freqTRI",
+  "ACCESAULOCAL":"acces","LIEUDESTOCKAGE":"stockage",
+  "PEUTONAMENAGERDELAPLACE":"amenager","BESOINDUNGARDIEN":"gardien"
+};
+
+/* =========================================================
+   2. ÉTAT
+   ========================================================= */
+let ROWS = [], VIEW = [], BASE = [];      // BASE = filtre commune seul (pour les compteurs de légende)
+let markers = new Map();
+let sortKey = null, sortAsc = true;
+let nbSuperposes = 0, nbRejetes = 0;
+
+/* =========================================================
+   3. CARTE
+   ========================================================= */
+const map = L.map("map", {preferCanvas:true}).setView([49.27,-0.12], 11);
+
+const fondPlan = L.maplibreGL({
+  style:"https://tiles.openfreemap.org/styles/positron",
+  attribution:'&copy; OpenStreetMap — OpenFreeMap'
+}).addTo(map);
+
+const fondSat = L.tileLayer(
+  "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image%2Fjpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+  {maxNativeZoom:19, maxZoom:21, attribution:"&copy; IGN / Géoplateforme"}
+);
+
+L.control.layers({"Plan":fondPlan,"Satellite":fondSat}, null, {position:"topright"}).addTo(map);
+L.control.scale({imperial:false}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+setTimeout(()=>map.invalidateSize(), 200);
+
+/* =========================================================
+   4. OUTILS
+   ========================================================= */
+const norm = s => String(s==null?"":s).normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+                  .toUpperCase().replace(/[^A-Z0-9]/g,"");
+const num = v => { if(v==null||v==="") return null;
+                   const n=parseFloat(String(v).replace(",",".")); return isNaN(n)?null:n; };
+const txt = v => (v==null?"":String(v).trim());
+const fr  = n => n==null ? "—" : n.toLocaleString("fr-FR");
+const pc  = (a,b) => b ? Math.round(100*a/b) : 0;
+
+function statutDe(v){
+  const s = norm(v);
+  if (s==="")              return "nonlivre";
+  if (s==="LIVRE")         return "livre";
+  if (s.indexOf("AVIS")===0) return "avis";
+  return "autre";
+}
+
+/* =========================================================
+   5. LECTURE DU CLASSEUR
+   ========================================================= */
+function parse(buffer, source, date){
+  const wb = XLSX.read(buffer, {type:"array"});
+  const ws = wb.Sheets[SHEET] || wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error("Feuille introuvable dans le classeur.");
+  const raw = XLSX.utils.sheet_to_json(ws, {defval:""});
+  if (!raw.length) throw new Error("La feuille est vide.");
+
+  const cols = {};
+  Object.keys(raw[0]).forEach(h => { const k = MAP[norm(h)]; if (k) cols[k]=h; });
+  ["lat","lon"].forEach(k=>{ if(!cols[k]) throw new Error("Colonne "+k.toUpperCase()+" absente."); });
+  const get = (r,k) => cols[k]===undefined ? "" : r[cols[k]];
+
+  ROWS = []; nbRejetes = 0;
+  raw.forEach((r,i)=>{
+    const lat=num(get(r,"lat")), lon=num(get(r,"lon"));
+    if (lat===null||lon===null||lat===0||lon===0){ nbRejetes++; return; }
+    const st = statutDe(get(r,"statut"));
+    const etat = txt(get(r,"etat"));
+    ROWS.push({
+      _id:ROWS.length,
+      ref:txt(get(r,"ref"))||("L"+(i+2)), nom:txt(get(r,"nom")), commune:txt(get(r,"commune")),
+      num:txt(get(r,"num")).replace(/\.0$/,""), voie:txt(get(r,"voie")),
+      lat, lon, appart:num(get(r,"appart")),
+      statutRaw:txt(get(r,"statut")), statut:st, etat,
+      bloque: st!=="livre" && BLOQUANTS.includes(norm(etat)),
+      volOM:num(get(r,"volOM")),theoOM:num(get(r,"theoOM")),ecartOM:num(get(r,"ecartOM")),
+      bacsOM:num(get(r,"bacsOM")),freqOM:num(get(r,"freqOM")),
+      volTRI:num(get(r,"volTRI")),theoTRI:num(get(r,"theoTRI")),ecartTRI:num(get(r,"ecartTRI")),
+      bacsTRI:num(get(r,"bacsTRI")),freqTRI:num(get(r,"freqTRI")),
+      acces:txt(get(r,"acces")),stockage:txt(get(r,"stockage")),
+      amenager:txt(get(r,"amenager")),gardien:txt(get(r,"gardien"))
+    });
+  });
+
+  decalerSuperposes();
+  initFiltres();
+  document.getElementById("dataDate").textContent =
+    "Données du " + (date ? new Date(date).toLocaleDateString("fr-FR") : "—") + " · " + source;
+  ["btnTable","btnCsv","btnGeo"].forEach(id=>document.getElementById(id).disabled=false);
+  document.getElementById("modal").classList.add("hide");
+  refresh(true);
+}
+
+/* Points strictement superposés : décalage en cercle (mètres réels), coordonnées d'origine conservées */
+function decalerSuperposes(){
+  const g = new Map();
+  ROWS.forEach(r=>{ const k=r.lat.toFixed(5)+"|"+r.lon.toFixed(5);
+                    if(!g.has(k)) g.set(k,[]); g.get(k).push(r); });
+  nbSuperposes = 0;
+  g.forEach(grp=>{
+    if (grp.length<2){ grp[0].dLat=grp[0].lat; grp[0].dLon=grp[0].lon; grp[0].sup=false; return; }
+    nbSuperposes += grp.length;
+    const d = 7 + grp.length;
+    grp.forEach((r,i)=>{
+      const a = 2*Math.PI*i/grp.length;
+      r.dLat = r.lat + (d*Math.sin(a))/111320;
+      r.dLon = r.lon + (d*Math.cos(a))/(111320*Math.cos(r.lat*Math.PI/180));
+      r.sup = true;
+    });
+  });
+}
+
+/* =========================================================
+   6. FILTRES + LÉGENDE
+   ========================================================= */
+function initFiltres(){
+  const sel = document.getElementById("fCommune");
+  const list = [...new Set(ROWS.map(r=>r.commune))].filter(Boolean).sort();
+  sel.innerHTML = '<option value="">— Toutes les communes ('+list.length+') —</option>' +
+                  list.map(c=>'<option>'+c+'</option>').join("");
+  document.getElementById("fMin").max = Math.min(Math.max(...ROWS.map(r=>r.appart||0)), 200);
+
+  document.getElementById("legend").innerHTML = Object.keys(STATUTS).map(k=>
+    '<div class="lyr" data-k="'+k+'">'+
+      '<span class="dot" style="background:'+STATUTS[k].color+'"></span>'+
+      '<div><div class="t">'+STATUTS[k].lab+'</div><div class="d">'+STATUTS[k].desc+'</div></div>'+
+      '<span class="n" id="c-'+k+'">0</span></div>').join("");
+  document.querySelectorAll(".lyr").forEach(el=>el.onclick=()=>{ el.classList.toggle("off"); refresh(); });
+
+  document.getElementById("helpLeg").innerHTML = Object.keys(STATUTS).map(k=>
+    '<div class="legrow"><span class="dot" style="background:'+STATUTS[k].color+'"></span>'+
+    STATUTS[k].lab+' — '+STATUTS[k].desc+'</div>').join("");
+}
+
+function filtrer(){
+  const com = document.getElementById("fCommune").value;
+  const min = +document.getElementById("fMin").value;
+  const q   = norm(document.getElementById("fSearch").value);
+  const off = [...document.querySelectorAll(".lyr.off")].map(e=>e.dataset.k);
+
+  BASE = ROWS.filter(r=>!com || r.commune===com);
+  VIEW = BASE.filter(r =>
+    !off.includes(r.statut) &&
+    (min===0 || (r.appart||0)>=min) &&
+    (!q || norm(r.nom+r.voie+r.ref+r.num).includes(q))
+  );
+}
+
+/* =========================================================
+   7. CARTE
+   ========================================================= */
+function rayon(r){
+  if (!document.getElementById("optSize").checked) return 6;
+  if (r.appart==null) return 4;
+  return 4 + 14*Math.sqrt(r.appart/600);
+}
+
+function dessiner(){
+  layer.clearLayers(); markers.clear();
+  const spread = document.getElementById("optSpread").checked;
+  VIEW.forEach(r=>{
+    const m = L.circleMarker(spread?[r.dLat,r.dLon]:[r.lat,r.lon], {
+      radius: rayon(r),
+      color: r.sup ? "#333" : "#fff",
+      weight: r.sup ? 1.4 : 1.2,
+      dashArray: r.sup ? "2,2" : null,
+      fillColor: STATUTS[r.statut].color,
+      fillOpacity: r.appart==null ? 0.45 : 0.85
+    });
+    m.bindPopup(()=>popup(r), {maxWidth:330, minWidth:265});
+    m.on("click", ()=>surligner(r._id));
+    m.addTo(layer); markers.set(r._id, m);
+  });
+}
+
+function popup(r){
+  const li = (k,v) => (v===""||v==null) ? "" : "<tr><td>"+k+"</td><td><b>"+v+"</b></td></tr>";
+  const sv = "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint="+r.lat+","+r.lon;
+  return ''
+  + '<h3>'+(r.nom || "<i>Gestionnaire non renseigné</i>")+'</h3>'
+  + '<div class="pop-adr">'+[r.num,r.voie].filter(Boolean).join(" ")+' — '+r.commune+'<br>Réf. '+r.ref+'</div>'
+  + '<span class="pill" style="background:'+STATUTS[r.statut].color+'">'+STATUTS[r.statut].lab+'</span>'
+  + (r.etat ? ' <span class="pill" style="background:#555">'+r.etat+'</span>' : '')
+  + '<table class="pop-t" style="margin-top:7px">'
+  +   li("Nb d'appartements", r.appart==null?"<i>non renseigné</i>":fr(r.appart))
+  + '</table>'
+  + '<div class="pop-sec">Ordures ménagères</div><table class="pop-t">'
+  +   li("Volume en place", r.volOM==null?null:fr(r.volOM)+" L")
+  +   li("Volume théorique", r.theoOM==null?null:fr(r.theoOM)+" L")
+  +   li("Écart", r.ecartOM==null?null:fr(r.ecartOM)+" L")
+  +   li("Bacs 660 / fréquence", (r.bacsOM==null?"—":fr(r.bacsOM))+" bac(s) · "+(r.freqOM==null?"—":r.freqOM))
+  + '</table>'
+  + '<div class="pop-sec">Tri</div><table class="pop-t">'
+  +   li("Volume en place", r.volTRI==null?null:fr(r.volTRI)+" L")
+  +   li("Volume théorique", r.theoTRI==null?null:fr(r.theoTRI)+" L")
+  +   li("Écart", r.ecartTRI==null?null:fr(r.ecartTRI)+" L")
+  +   li("Bacs 660 / fréquence", (r.bacsTRI==null?"—":fr(r.bacsTRI))+" bac(s) · "+(r.freqTRI==null?"—":r.freqTRI))
+  + '</table>'
+  + '<div class="pop-sec">Accès</div><table class="pop-t">'
+  +   li("Accès au local", r.acces) + li("Lieu de stockage", r.stockage)
+  +   li("Aménagement possible", r.amenager) + li("Besoin d'un gardien", r.gardien)
+  + '</table>'
+  + (r.sup ? '<div class="pop-note">Coordonnées partagées avec d\'autres adresses : point légèrement décalé pour rester cliquable.</div>' : '')
+  + '<div style="margin-top:8px"><a href="'+sv+'" target="_blank" rel="noopener">Ouvrir dans Street View ↗</a></div>';
+}
+
+/* =========================================================
+   8. KPI + STATISTIQUES
+   ========================================================= */
+function kpi(){
+  const n = BASE.length;
+  const liv = BASE.filter(r=>r.statut==="livre").length;
+  const blo = BASE.filter(r=>r.bloque).length;
+  const trt = n - liv - blo;
+  const appTot = BASE.reduce((s,r)=>s+(r.appart||0),0);
+  const appLiv = BASE.filter(r=>r.statut==="livre").reduce((s,r)=>s+(r.appart||0),0);
+  const av = pc(liv, n-blo);
+
+  document.getElementById("k1").textContent  = fr(liv);
+  document.getElementById("k1s").textContent = "sur "+fr(n)+" adresses recensées";
+  document.getElementById("k2").textContent  = av+"%";
+  document.getElementById("k3").textContent  = fr(trt);
+  document.getElementById("k3s").textContent = blo ? fr(blo)+" situation(s) bloquée(s) exclue(s)" : "aucune situation bloquée";
+  document.getElementById("k4").textContent  = fr(appLiv);
+  document.getElementById("k4s").textContent = "sur "+fr(appTot)+" appartements";
+
+  const com = document.getElementById("fCommune").value;
+  document.getElementById("ctxTitle").textContent = com || "Tout le territoire";
+  document.getElementById("ctxSub").textContent   = fr(VIEW.length)+" adresse(s) affichée(s)";
+
+  document.getElementById("pbar").style.width = av+"%";
+  document.getElementById("plabTxt").textContent = fr(liv)+" / "+fr(n-blo)+" à livrer";
+  document.getElementById("plabPc").textContent  = av+"%";
+
+  Object.keys(STATUTS).forEach(k=>{
+    const e=document.getElementById("c-"+k); if(e) e.textContent = fr(BASE.filter(r=>r.statut===k).length);
+  });
+
+  const w=[];
+  if (nbSuperposes) w.push(nbSuperposes+" adresses partagent des coordonnées identiques avec une autre (géocodage à la rue ou immeuble multi-gestionnaires).");
+  if (nbRejetes)    w.push(nbRejetes+" ligne(s) écartée(s) faute de coordonnées valides.");
+  document.getElementById("warn").innerHTML = w.length ? '<div class="warn">'+w.join("<br><br>")+'</div>' : "";
+}
+
+function bar(lab, val, tot, color){
+  return '<div class="row"><div class="l"><span>'+lab+'</span><span>'+fr(val)+' · '+pc(val,tot)+'%</span></div>'
+       + '<div class="b"><i style="width:'+pc(val,tot)+'%;background:'+color+'"></i></div></div>';
+}
+
+function statistiques(){
+  const n = BASE.length; if(!n){ document.getElementById("p-sta").innerHTML=""; return; }
+  let h = '<div class="h2">Répartition par statut</div>';
+  Object.keys(STATUTS).forEach(k=>{
+    const v = BASE.filter(r=>r.statut===k).length;
+    if (v) h += bar(STATUTS[k].lab, v, n, STATUTS[k].color);
+  });
+
+  h += '<div class="h2 mt">Motifs renseignés (champ ÉTAT)</div>';
+  const etats = {};
+  BASE.forEach(r=>{ const e=r.etat||"Non renseigné"; etats[e]=(etats[e]||0)+1; });
+  Object.entries(etats).sort((a,b)=>b[1]-a[1]).forEach(([e,v])=>{
+    h += bar(e, v, n, BLOQUANTS.includes(norm(e)) ? "#6C5CE7" : "#8C949E");
+  });
+
+  h += '<div class="h2 mt">Taux de livraison par taille d\'immeuble</div>';
+  const tr = [["2 à 9 appart.",2,9],["10 à 19",10,19],["20 à 49",20,49],["50 et plus",50,1e9]];
+  tr.forEach(([lab,a,b])=>{
+    const g = BASE.filter(r=>r.appart!=null && r.appart>=a && r.appart<=b);
+    if (!g.length) return;
+    const l = g.filter(r=>r.statut==="livre").length;
+    h += '<div class="row"><div class="l"><span>'+lab+' <span style="color:#98a2b0">('+g.length+')</span></span>'
+       + '<span>'+pc(l,g.length)+'% livrés</span></div>'
+       + '<div class="b"><i style="width:'+pc(l,g.length)+'%;background:#3F9142"></i></div></div>';
+  });
+  const sans = BASE.filter(r=>r.appart==null).length;
+  if (sans) h += '<div class="warn">'+sans+' adresse(s) sans nombre d\'appartements renseigné, exclues de cette répartition.</div>';
+
+  h += '<div class="h2 mt">Volumes en place (sélection)</div>';
+  const vOM = BASE.reduce((s,r)=>s+(r.volOM||0),0), vTRI = BASE.reduce((s,r)=>s+(r.volTRI||0),0);
+  const tOM = BASE.reduce((s,r)=>s+(r.theoOM||0),0), tTRI = BASE.reduce((s,r)=>s+(r.theoTRI||0),0);
+  h += '<div class="row"><div class="l"><span>OM en place / théorique</span><span>'+fr(vOM)+' / '+fr(Math.round(tOM))+' L</span></div></div>'
+     + '<div class="row"><div class="l"><span>Tri en place / théorique</span><span>'+fr(vTRI)+' / '+fr(Math.round(tTRI))+' L</span></div></div>';
+
+  document.getElementById("p-sta").innerHTML = h;
+}
+
+function communes(){
+  const map2 = {};
+  ROWS.forEach(r=>{
+    const c = r.commune || "—";
+    if (!map2[c]) map2[c] = {n:0,liv:0,blo:0,app:0};
+    map2[c].n++; map2[c].app += r.appart||0;
+    if (r.statut==="livre") map2[c].liv++;
+    if (r.bloque) map2[c].blo++;
+  });
+  const sel = document.getElementById("fCommune").value;
+  const rows = Object.entries(map2).sort((a,b)=>b[1].n-a[1].n).map(([c,d])=>
+    '<tr class="'+(c===sel?"act":"")+'" data-c="'+c+'"><td>'+c+'</td>'
+    + '<td class="num">'+d.n+'</td><td class="num">'+d.liv+'</td>'
+    + '<td class="num">'+pc(d.liv,d.n-d.blo)+'%</td><td class="num">'+fr(d.app)+'</td></tr>').join("");
+
+  document.getElementById("p-com").innerHTML =
+    '<div class="h2">Avancement par commune</div>'
+  + '<table id="comTable"><thead><tr><th>Commune</th><th class="num">Adr.</th>'
+  + '<th class="num">Livr.</th><th class="num">%</th><th class="num">Appart.</th></tr></thead><tbody>'
+  + rows + '</tbody></table>';
+
+  document.querySelectorAll("#comTable tbody tr").forEach(tr=>tr.onclick=()=>{
+    const c = tr.dataset.c;
+    document.getElementById("fCommune").value = (c===sel ? "" : c);
+    refresh(true);
+  });
+}
+
+/* =========================================================
+   9. TABLEAU
+   ========================================================= */
+const COLS = [
+  {k:"ref",t:"Réf."},{k:"nom",t:"Gestionnaire"},{k:"commune",t:"Commune"},
+  {k:"voie",t:"Adresse",v:r=>[r.num,r.voie].filter(Boolean).join(" ")},
+  {k:"appart",t:"Appart.",n:true},
+  {k:"statut",t:"Statut",v:r=>STATUTS[r.statut].lab},
+  {k:"etat",t:"État"},{k:"volOM",t:"Vol. OM",n:true},{k:"volTRI",t:"Vol. TRI",n:true}
+];
+
+function tableau(){
+  const th = document.querySelector("#tbl thead");
+  th.innerHTML = "<tr>"+COLS.map(c=>"<th data-k='"+c.k+"'>"+c.t+(sortKey===c.k?(sortAsc?" ▲":" ▼"):"")+"</th>").join("")+"</tr>";
+  th.querySelectorAll("th").forEach(h=>h.onclick=()=>{
+    const k=h.dataset.k; sortAsc = (sortKey===k)?!sortAsc:true; sortKey=k; refresh();
+  });
+
+  let data = VIEW.slice();
+  if (sortKey) data.sort((a,b)=>{
+    let x=a[sortKey], y=b[sortKey];
+    if (typeof x==="number"||typeof y==="number"){ x=x??-1; y=y??-1; return sortAsc?x-y:y-x; }
+    x=String(x||""); y=String(y||"");
+    return sortAsc ? x.localeCompare(y,"fr") : y.localeCompare(x,"fr");
+  });
+
+  document.querySelector("#tbl tbody").innerHTML = data.map(r=>
+    "<tr data-id='"+r._id+"'>"+COLS.map(c=>{
+      const v = c.v ? c.v(r) : (r[c.k]==null?"":r[c.k]);
+      return "<td"+(c.n?" class='num'":"")+">"+(c.n?fr(r[c.k]):v)+"</td>";
+    }).join("")+"</tr>").join("");
+
+  document.querySelectorAll("#tbl tbody tr").forEach(tr=>tr.onclick=()=>{
+    const id=+tr.dataset.id, m=markers.get(id); if(!m) return;
+    map.setView(m.getLatLng(), Math.max(map.getZoom(),18)); m.openPopup(); surligner(id);
+  });
+}
+
+function surligner(id){
+  document.querySelectorAll("#tbl tbody tr").forEach(tr=>tr.classList.toggle("sel", +tr.dataset.id===id));
+  const tr = document.querySelector("#tbl tbody tr.sel"); if (tr) tr.scrollIntoView({block:"nearest"});
+}
+
+/* =========================================================
+   10. EXPORTS
+   ========================================================= */
+function dl(blob,nom){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nom; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+const EXP = ["ref","nom","commune","num","voie","lat","lon","appart","statutRaw","etat","bloque",
+             "volOM","theoOM","ecartOM","bacsOM","freqOM","volTRI","theoTRI","ecartTRI","bacsTRI","freqTRI",
+             "acces","stockage","amenager","gardien"];
+
+function exportCsv(){
+  const esc = v => '"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+  const csv = [EXP.join(";")].concat(VIEW.map(r=>EXP.map(c=>esc(r[c])).join(";"))).join("\r\n");
+  dl(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}), "situation_collectif_selection.csv");
+}
+function exportGeo(){
+  const gj = {type:"FeatureCollection", features:VIEW.map(r=>{
+    const p={}; EXP.forEach(k=>p[k]=r[k]); p.statut_lib = STATUTS[r.statut].lab;
+    return {type:"Feature",geometry:{type:"Point",coordinates:[r.lon,r.lat]},properties:p};
+  })};
+  dl(new Blob([JSON.stringify(gj)],{type:"application/geo+json"}), "situation_collectif_selection.geojson");
+}
+
+/* =========================================================
+   11. RAFRAÎCHISSEMENT
+   ========================================================= */
+function refresh(fit){
+  filtrer(); dessiner(); kpi(); statistiques(); communes(); tableau();
+  if (fit && VIEW.length) map.fitBounds(L.latLngBounds(VIEW.map(r=>[r.dLat,r.dLon])), {padding:[30,30]});
+}
+
+/* =========================================================
+   12. ÉVÉNEMENTS
+   ========================================================= */
+const msg=(t,e)=>{const el=document.getElementById("msg"); el.textContent=t; el.className=e?"err":"";};
+
+/* --- Contrôle d'accès -------------------------------------------------
+   Le mot de passe n'est pas stocké dans le code : seule l'empreinte
+   PBKDF2-SHA256 (150 000 itérations, sel fixe) y figure. La saisie est
+   passée dans la même moulinette et les deux empreintes sont comparées. */
+const PWD_SALT = "ncpa-collectif-2026";
+const PWD_HASH = "ef717a4dd032a40c164d6c21d187146a6076049243dda5f08d8adb1a159f9c07";
+
+async function empreinte(txt){
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey("raw", enc.encode(txt.normalize("NFC")), "PBKDF2", false, ["deriveBits"]);
+  const b = await crypto.subtle.deriveBits(
+    {name:"PBKDF2", salt:enc.encode(PWD_SALT), iterations:150000, hash:"SHA-256"}, k, 256);
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+function chargerDepot(){
+  msg("Chargement des données…");
+  return fetch(DATA_URL,{cache:"no-store"})
+    .then(r=>{
+      if(!r.ok) throw new Error("fichier introuvable ("+r.status+")");
+      const d = r.headers.get("last-modified");
+      return r.arrayBuffer().then(b=>parse(new Uint8Array(b), "dépôt", d || Date.now()));
+    })
+    .catch(e=>msg("Impossible de charger "+DATA_URL+" : "+e.message, true));
+}
+
+async function verifier(){
+  const p = document.getElementById("pwd").value;
+  if (!p) return msg("Saisissez le mot de passe.", true);
+  if (!window.crypto || !crypto.subtle)
+    return msg("Contrôle d'accès indisponible : ouvrez l'outil via son adresse https, pas en local.", true);
+  msg("Vérification…");
+  try{
+    if (await empreinte(p) !== PWD_HASH){ msg("Mot de passe incorrect.", true); return; }
+  }catch(e){ return msg("Erreur de vérification : "+e.message, true); }
+  try{ sessionStorage.setItem("ncpa_collectif_ok","1"); }catch(e){}
+  document.getElementById("pwd").value = "";
+  chargerDepot();
+}
+
+document.getElementById("btnOk").onclick = verifier;
+document.getElementById("pwd").addEventListener("keydown", e=>{ if(e.key==="Enter") verifier(); });
+
+document.getElementById("btnLoad").onclick = ()=>{
+  let ok=false; try{ ok = sessionStorage.getItem("ncpa_collectif_ok")==="1"; }catch(e){}
+  if (ok){ chargerDepot(); }
+  else { document.getElementById("modal").classList.remove("hide"); msg(""); }
+};
+document.getElementById("btnHelp").onclick = ()=>document.getElementById("help").classList.remove("hide");
+document.getElementById("btnHelpClose").onclick = ()=>document.getElementById("help").classList.add("hide");
+document.getElementById("btnTable").onclick = ()=>{
+  const w=document.getElementById("tableWrap"); w.classList.toggle("on");
+  document.getElementById("btnTable").classList.toggle("on", w.classList.contains("on"));
+  setTimeout(()=>map.invalidateSize(),250);
+};
+document.getElementById("btnCsv").onclick = exportCsv;
+document.getElementById("btnGeo").onclick = exportGeo;
+
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("sel", x===b));
+  document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("sel", p.id==="p-"+b.dataset.t));
+});
+
+document.getElementById("fCommune").onchange = ()=>refresh(true);
+document.getElementById("fSearch").oninput   = ()=>refresh();
+document.getElementById("optSize").onchange  = ()=>refresh();
+document.getElementById("optSpread").onchange= ()=>refresh();
+document.getElementById("fMin").oninput = e=>{ document.getElementById("minLab").textContent=e.target.value; refresh(); };
+
+// au démarrage : accès direct si le mot de passe a déjà été validé dans cet onglet
+let dejaOk=false; try{ dejaOk = sessionStorage.getItem("ncpa_collectif_ok")==="1"; }catch(e){}
+if (dejaOk) chargerDepot(); else setTimeout(()=>document.getElementById("pwd").focus(), 150);
+</script>
+</body>
+</html>
