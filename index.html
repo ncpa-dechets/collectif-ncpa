@@ -134,7 +134,22 @@ label.chk{display:flex;align-items:center;gap:8px;font-size:13px;margin:7px 0;cu
 
 /* ========== CARTE / TABLEAU ========== */
 #right{flex:1 1 auto;display:flex;flex-direction:column;min-width:0}
-#map{flex:1 1 auto;height:0;position:relative;background:#e8e8e6}
+#mapWrap{flex:1 1 auto;height:0;position:relative}
+#map{position:absolute;inset:0;background:#e8e8e6}
+.selmode .leaflet-container{cursor:crosshair}
+
+/* panneau flottant de sélection */
+#selPanel{
+  position:absolute;left:12px;bottom:22px;z-index:600;width:236px;
+  background:var(--bg2);border:1px solid var(--bord);border-top:3px solid var(--avis);
+  border-radius:5px;padding:11px 12px;box-shadow:0 6px 20px rgba(0,0,0,.45);
+}
+#selPanel.hide{display:none}
+#selPanel .t{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--avis);font-weight:700}
+#selPanel .n{font-size:22px;font-weight:700;line-height:1.1;margin:3px 0}
+#selPanel .s{font-size:11.5px;color:var(--mut);line-height:1.35}
+#selPanel .bts{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+#selPanel button{font-size:12px;padding:5px 9px}
 #tableWrap{flex:0 0 auto;height:0;overflow:auto;border-top:1px solid var(--bord);display:none;background:var(--bg)}
 #tableWrap.on{display:block;height:260px}
 
@@ -195,7 +210,9 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <span class="meta" id="dataDate">Aucune donnée chargée</span>
   <div class="actions">
     <button id="btnHelp">Comprendre la carte</button>
+    <button id="btnSel" disabled>Sélection</button>
     <button id="btnTable" disabled>Tableau</button>
+    <button id="btnXls" disabled>Exporter Excel</button>
     <button id="btnCsv" disabled>Exporter CSV</button>
     <button id="btnGeo" disabled>Exporter GeoJSON</button>
     <button id="btnLoad" class="red">Actualiser les données</button>
@@ -248,7 +265,19 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   </aside>
 
   <div id="right">
-    <div id="map"></div>
+    <div id="mapWrap">
+      <div id="map"></div>
+      <div id="selPanel" class="hide">
+        <div class="t">Sélection</div>
+        <div class="n" id="selN">0</div>
+        <div class="s" id="selS">Tracez un rectangle sur la carte, ou cliquez les points un à un.</div>
+        <div class="bts">
+          <button id="selXls" class="red">Excel</button>
+          <button id="selAll">Tout l'affichage</button>
+          <button id="selClear">Vider</button>
+        </div>
+      </div>
+    </div>
     <div id="tableWrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
   </div>
 </div>
@@ -285,6 +314,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div class="h2 mt">Points à liseré pointillé</div>
     <p>Adresses partageant des coordonnées strictement identiques avec d'autres : elles sont
        légèrement écartées en cercle pour rester cliquables. Position réelle conservée dans les exports.</p>
+    <div class="h2 mt">Sélectionner des points</div>
+    <p>Le bouton <b>Sélection</b> active le mode de sélection : tracez un rectangle sur la carte pour
+       prendre tous les points qu'il contient, ou cliquez les points un à un pour les ajouter et les
+       retirer. Un contour noir signale un point sélectionné. Le panneau en bas à gauche donne le
+       total et exporte directement en Excel. La sélection est conservée quand vous changez de commune
+       ou de filtre : elle peut donc être constituée en plusieurs passes.</p>
+    <p>Tant que ce mode est actif, la carte ne se déplace plus : désactivez-le pour naviguer à nouveau.
+       Sans sélection, les trois boutons d'export portent sur l'affichage filtré en cours.</p>
     <div class="h2 mt">Situations bloquées</div>
     <p>Adresses non livrées dont le champ ÉTAT indique « PAS DE PLACE », « REFUS » ou « PRIVE ».
        Elles sont exclues du calcul d'avancement, comme les non livrables de l'outil Conteneurisation.</p>
@@ -328,6 +365,8 @@ const MAP = {
    ========================================================= */
 let ROWS = [], VIEW = [], BASE = [];      // BASE = filtre commune seul (pour les compteurs de légende)
 let markers = new Map();
+let SEL = new Set();          // références (_id) des points sélectionnés
+let selMode = false;
 let sortKey = null, sortAsc = true;
 let nbSuperposes = 0, nbRejetes = 0;
 
@@ -411,7 +450,7 @@ function parse(buffer, source, date){
   initFiltres();
   document.getElementById("dataDate").textContent =
     "Données du " + (date ? new Date(date).toLocaleDateString("fr-FR") : "—") + " · " + source;
-  ["btnTable","btnCsv","btnGeo"].forEach(id=>document.getElementById(id).disabled=false);
+  ["btnSel","btnTable","btnXls","btnCsv","btnGeo"].forEach(id=>document.getElementById(id).disabled=false);
   document.getElementById("modal").classList.add("hide");
   refresh(true);
 }
@@ -492,9 +531,14 @@ function dessiner(){
       fillColor: STATUTS[r.statut].color,
       fillOpacity: r.appart==null ? 0.45 : 0.85
     });
-    m.bindPopup(()=>popup(r), {maxWidth:330, minWidth:265});
-    m.on("click", ()=>surligner(r._id));
+    m._base = {color:m.options.color, weight:m.options.weight, dash:m.options.dashArray};
+    m.on("click", ev=>{
+      if (selMode){ toggleSel(r._id); L.DomEvent.stop(ev); return; }
+      m.bindPopup(popup(r), {maxWidth:330, minWidth:265}).openPopup();
+      surligner(r._id);
+    });
     m.addTo(layer); markers.set(r._id, m);
+    if (SEL.has(r._id)) styleSel(m, true);
   });
 }
 
@@ -681,7 +725,72 @@ function surligner(id){
 }
 
 /* =========================================================
-   10. EXPORTS
+   10. SÉLECTION (rectangle ou clic)
+   ========================================================= */
+function styleSel(m, on){
+  if (on) m.setStyle({color:"#111", weight:3, dashArray:null});
+  else    m.setStyle({color:m._base.color, weight:m._base.weight, dashArray:m._base.dash});
+  m.bringToFront && m.bringToFront();
+}
+function toggleSel(id){
+  if (SEL.has(id)) SEL.delete(id); else SEL.add(id);
+  const m = markers.get(id); if (m) styleSel(m, SEL.has(id));
+  majSel();
+}
+function majSel(){
+  const n = SEL.size;
+  document.getElementById("selN").textContent = fr(n);
+  const rows = ROWS.filter(r=>SEL.has(r._id));
+  const app  = rows.reduce((s,r)=>s+(r.appart||0),0);
+  const liv  = rows.filter(r=>r.statut==="livre").length;
+  document.getElementById("selS").innerHTML = n
+    ? "point(s) — "+fr(app)+" appartements<br>"+fr(liv)+" livré(s), "+fr(n-liv)+" non livré(s)"
+    : "Tracez un rectangle sur la carte, ou cliquez les points un à un. Le déplacement de la carte est suspendu tant que le mode est actif.";
+  ["selXls"].forEach(i=>document.getElementById(i).disabled = !n);
+  document.getElementById("selPanel").classList.toggle("hide", !selMode && !n);
+}
+function videSel(){
+  SEL.forEach(id=>{ const m=markers.get(id); if(m) styleSel(m,false); });
+  SEL.clear(); majSel();
+}
+function selectionAffichage(){
+  VIEW.forEach(r=>{ SEL.add(r._id); const m=markers.get(r._id); if(m) styleSel(m,true); });
+  majSel();
+}
+
+/* mode rectangle : on neutralise le déplacement de la carte pendant le tracé */
+let rectStart=null, rectBox=null;
+function setSelMode(on){
+  selMode = on;
+  document.body.classList.toggle("selmode", on);
+  document.getElementById("btnSel").classList.toggle("on", on);
+  if (on){ map.dragging.disable(); map.boxZoom.disable(); map.closePopup(); }
+  else   { map.dragging.enable();  map.boxZoom.enable(); }
+  majSel();
+}
+map.on("mousedown", e=>{
+  if (!selMode) return;
+  rectStart = e.latlng;
+  rectBox = L.rectangle(L.latLngBounds(rectStart, rectStart),
+            {color:"#E8A33D", weight:1.5, dashArray:"4,3", fillOpacity:.08}).addTo(map);
+});
+document.addEventListener("mousemove", e=>{
+  if (!rectBox) return;
+  rectBox.setBounds(L.latLngBounds(rectStart, map.mouseEventToLatLng(e)));
+});
+document.addEventListener("mouseup", e=>{
+  if (!rectBox) return;
+  const b = L.latLngBounds(rectStart, map.mouseEventToLatLng(e));
+  map.removeLayer(rectBox); rectBox=null; rectStart=null;
+  const p1 = map.latLngToContainerPoint(b.getNorthWest());
+  const p2 = map.latLngToContainerPoint(b.getSouthEast());
+  if (Math.abs(p1.x-p2.x) < 5 && Math.abs(p1.y-p2.y) < 5) return;  // simple clic : géré par le marqueur
+  markers.forEach((m,id)=>{ if (b.contains(m.getLatLng())){ SEL.add(id); styleSel(m,true); } });
+  majSel();
+});
+
+/* =========================================================
+   11. EXPORTS
    ========================================================= */
 function dl(blob,nom){
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nom; a.click();
@@ -691,29 +800,63 @@ const EXP = ["ref","nom","commune","num","voie","lat","lon","appart","statutRaw"
              "volOM","theoOM","ecartOM","bacsOM","freqOM","volTRI","theoTRI","ecartTRI","bacsTRI","freqTRI",
              "acces","stockage","amenager","gardien"];
 
+/* Jeu exporté : la sélection si elle existe, sinon l'affichage filtré */
+function jeu(){ return SEL.size ? ROWS.filter(r=>SEL.has(r._id)) : VIEW; }
+function suffixe(){ return (SEL.size ? "selection_" : "filtre_") +
+  new Date().toISOString().slice(0,10).replace(/-/g,""); }
+
+const ENTETES = {
+  ref:"Référence", nom:"Nom", commune:"Commune", num:"N°", voie:"Voie",
+  lat:"LATITUDE", lon:"LONGITUDE", appart:"Nb appart.", statutRaw:"Statut livraison",
+  etat:"ETAT", bloque:"Situation bloquée",
+  volOM:"Vol. EN PLACE OM", theoOM:"Vol. théo. OM", ecartOM:"Écart OM",
+  bacsOM:"Nb bacs 660 OM", freqOM:"Fréq. OM",
+  volTRI:"Vol. EN PLACE TRI", theoTRI:"Vol. théo. TRI", ecartTRI:"Écart TRI",
+  bacsTRI:"Nb bacs 660 TRI", freqTRI:"Fréq. TRI",
+  acces:"Accès au local", stockage:"Lieu de stockage",
+  amenager:"Peut-on aménager de la place", gardien:"Besoin d'un gardien"
+};
+
+function exportXls(){
+  const data = jeu();
+  if (!data.length) return;
+  const aoa = data.map(r=>{
+    const o = {};
+    EXP.forEach(k=> o[ENTETES[k]] = (k==="bloque") ? (r.bloque?"OUI":"") : r[k]);
+    o["Statut (lecture)"] = STATUTS[r.statut].lab;
+    return o;
+  });
+  const ws = XLSX.utils.json_to_sheet(aoa);
+  ws["!cols"] = Object.keys(aoa[0]).map(k=>({wch: Math.min(Math.max(k.length+2, 10), 30)}));
+  ws["!autofilter"] = {ref: ws["!ref"]};
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "collectif");
+  XLSX.writeFile(wb, "collectif_"+suffixe()+".xlsx");
+}
+
 function exportCsv(){
   const esc = v => '"'+String(v==null?"":v).replace(/"/g,'""')+'"';
-  const csv = [EXP.join(";")].concat(VIEW.map(r=>EXP.map(c=>esc(r[c])).join(";"))).join("\r\n");
-  dl(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}), "situation_collectif_selection.csv");
+  const csv = [EXP.join(";")].concat(jeu().map(r=>EXP.map(c=>esc(r[c])).join(";"))).join("\r\n");
+  dl(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}), "collectif_"+suffixe()+".csv");
 }
 function exportGeo(){
-  const gj = {type:"FeatureCollection", features:VIEW.map(r=>{
+  const gj = {type:"FeatureCollection", features:jeu().map(r=>{
     const p={}; EXP.forEach(k=>p[k]=r[k]); p.statut_lib = STATUTS[r.statut].lab;
     return {type:"Feature",geometry:{type:"Point",coordinates:[r.lon,r.lat]},properties:p};
   })};
-  dl(new Blob([JSON.stringify(gj)],{type:"application/geo+json"}), "situation_collectif_selection.geojson");
+  dl(new Blob([JSON.stringify(gj)],{type:"application/geo+json"}), "collectif_"+suffixe()+".geojson");
 }
 
 /* =========================================================
-   11. RAFRAÎCHISSEMENT
+   12. RAFRAÎCHISSEMENT
    ========================================================= */
 function refresh(fit){
-  filtrer(); dessiner(); kpi(); statistiques(); communes(); tableau();
+  filtrer(); dessiner(); kpi(); statistiques(); communes(); tableau(); majSel();
   if (fit && VIEW.length) map.fitBounds(L.latLngBounds(VIEW.map(r=>[r.dLat,r.dLon])), {padding:[30,30]});
 }
 
 /* =========================================================
-   12. ÉVÉNEMENTS
+   13. ÉVÉNEMENTS
    ========================================================= */
 const msg=(t,e)=>{const el=document.getElementById("msg"); el.textContent=t; el.className=e?"err":"";};
 
@@ -772,6 +915,11 @@ document.getElementById("btnTable").onclick = ()=>{
   document.getElementById("btnTable").classList.toggle("on", w.classList.contains("on"));
   setTimeout(()=>map.invalidateSize(),250);
 };
+document.getElementById("btnSel").onclick = ()=>setSelMode(!selMode);
+document.getElementById("selClear").onclick = videSel;
+document.getElementById("selAll").onclick = selectionAffichage;
+document.getElementById("selXls").onclick = exportXls;
+document.getElementById("btnXls").onclick = exportXls;
 document.getElementById("btnCsv").onclick = exportCsv;
 document.getElementById("btnGeo").onclick = exportGeo;
 
